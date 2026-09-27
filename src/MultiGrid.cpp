@@ -21,8 +21,35 @@
 #include "MultiGrid.h"
 #include "LaplacianOperator.h"
 #include "GaussSeidel.h"
+#include "FiniteDifference.h"
+
+#include <stdexcept>
 
 using namespace std;
+
+//------------------------------------------------------------//
+// Coarsening Validation
+//------------------------------------------------------------//
+
+void MultiGrid::validateCoarsening
+(
+    int N,
+    int numLevels,
+    const string& label
+)
+{
+    int divisor = 1 << (numLevels-1);
+
+    if((N-1)%divisor != 0)
+    {
+        throw invalid_argument
+        (
+            label+": N-1 = "+to_string(N-1)+" is not divisible by 2^"+
+            to_string(numLevels-1)+" ("+to_string(divisor)+"); "+
+            to_string(numLevels)+" levels cannot coarsen this grid cleanly."
+        );
+    }
+}
 
 //------------------------------------------------------------//
 // Grid Hierarchy
@@ -349,14 +376,49 @@ int MultiGrid::solve
     int nu2
 )
 {
+    if(numLevels < 1)
+    {
+        throw invalid_argument
+        (
+            "MultiGrid::solve: numLevels must be at least 1, got "+to_string(numLevels)
+        );
+    }
+
+    validateCoarsening(Nx, numLevels, "MultiGrid::solve (Nx)");
+    validateCoarsening(Ny, numLevels, "MultiGrid::solve (Ny)");
+
     vector<GridLevel> levels = buildHierarchy(numLevels, phi, f, Nx, Ny, dx, dy);
+
+    //--------------------------------------------------
+    // Every level in the hierarchy must be large enough
+    // for this stencil's halfWidth, not just level 0 — the
+    // coarsest level is the one most likely to violate this.
+    //--------------------------------------------------
+
+    int halfWidth = ((int)offsets.size()-1)/2;
+
+    for(int l = 0; l < numLevels; l++)
+    {
+        FiniteDifference::checkGridSize(levels[l].Nx, halfWidth, "MultiGrid::solve level "+to_string(l)+" (Nx)");
+        FiniteDifference::checkGridSize(levels[l].Ny, halfWidth, "MultiGrid::solve level "+to_string(l)+" (Ny)");
+    }
 
     int gamma = (cycleType == CycleType::W) ? 2 : 1;
 
     for(int iter = 0; iter < maxCycles; iter++)
     {
-        if(cycleType == CycleType::F)
+        if(cycleType == CycleType::F && iter == 0)
         {
+            //--------------------------------------------------
+            // fmg() always restarts from the coarsest level and
+            // walks back up, so calling it again on a later
+            // iteration would just recompute the same result and
+            // discard whatever progress the previous iterations
+            // made. It is a one-time initial solve; any further
+            // iterations continue as ordinary V-cycles (gamma=1,
+            // matching the CycleType::F/V default above).
+            //--------------------------------------------------
+
             fmg(levels, offsets, nu1, nu2);
         }
         else

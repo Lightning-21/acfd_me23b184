@@ -2,6 +2,7 @@
 #define MULTIGRID_H
 
 #include <vector>
+#include <string>
 
 enum class CycleType { V, W, F };
 
@@ -22,6 +23,14 @@ public:
 
     //--------------------------------------------------
     // Solve
+    //
+    // Throws std::invalid_argument if numLevels < 1, or if
+    // Nx-1/Ny-1 is not evenly divisible by 2^(numLevels-1)
+    // (coarsening would not land on the same physical nodes
+    // restrictField/prolongField assume). Throws
+    // FiniteDifference::InsufficientNodesError if any level
+    // in the resulting hierarchy is too small for the given
+    // stencil's halfWidth.
     //--------------------------------------------------
 
     static int solve
@@ -42,6 +51,19 @@ public:
     );
 
 private:
+
+    //--------------------------------------------------
+    // Throws std::invalid_argument if N-1 is not evenly
+    // divisible by 2^(numLevels-1) — i.e. this many levels
+    // cannot coarsen this grid down cleanly.
+    //--------------------------------------------------
+
+    static void validateCoarsening
+    (
+        int N,
+        int numLevels,
+        const std::string& label
+    );
 
     static std::vector<GridLevel> buildHierarchy
     (

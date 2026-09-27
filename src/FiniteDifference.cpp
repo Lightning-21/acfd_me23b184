@@ -17,6 +17,15 @@
 using namespace std;
 
 //------------------------------------------------------------//
+// Errors
+//------------------------------------------------------------//
+
+FiniteDifference::InsufficientNodesError::InsufficientNodesError(const string& message)
+: runtime_error(message)
+{
+}
+
+//------------------------------------------------------------//
 // Stencil Construction
 //------------------------------------------------------------//
 
@@ -79,7 +88,7 @@ vector<double> FiniteDifference::fdWeights(const vector<int>& offsets)
         }
     }
 
-    b[1] = 1.0;
+    b[1] = factorial(1);
 
     return solveLinearSystem(A, b, n);
 }
@@ -210,6 +219,31 @@ double FiniteDifference::extrapolate
     }
 
     return value;
+}
+
+//------------------------------------------------------------//
+// Grid-Size Validation
+//------------------------------------------------------------//
+
+void FiniteDifference::checkGridSize
+(
+    int N,
+    int halfWidth,
+    const string& label
+)
+{
+    int minRequired = halfWidth+1;
+
+    if(N < minRequired)
+    {
+        throw InsufficientNodesError
+        (
+            label+": grid has "+to_string(N)+" node(s) along this direction, "
+            "but a stencil of halfWidth "+to_string(halfWidth)+
+            " needs at least "+to_string(minRequired)+
+            " (even with ghost-node extrapolation)."
+        );
+    }
 }
 
 //------------------------------------------------------------//

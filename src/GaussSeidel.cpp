@@ -21,6 +21,7 @@
 
 #include "GaussSeidel.h"
 #include "LaplacianOperator.h"
+#include "FiniteDifference.h"
 
 #include <cmath>
 
@@ -43,6 +44,9 @@ void GaussSeidel::sweep
 {
     int halfWidth = ((int)offsets.size()-1)/2;
     int center = halfWidth;
+
+    FiniteDifference::checkGridSize(Nx, halfWidth, "GaussSeidel::sweep (Nx)");
+    FiniteDifference::checkGridSize(Ny, halfWidth, "GaussSeidel::sweep (Ny)");
 
     vector<double> wx = LaplacianOperator::computeWeights(offsets, dx);
     vector<double> wy = LaplacianOperator::computeWeights(offsets, dy);
