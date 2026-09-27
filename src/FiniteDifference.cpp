@@ -13,6 +13,7 @@
 #include "FiniteDifference.h"
 
 #include <cmath>
+#include <algorithm>
 
 using namespace std;
 
@@ -232,7 +233,7 @@ void FiniteDifference::checkGridSize
     const string& label
 )
 {
-    int minRequired = halfWidth+1;
+    int minRequired = max(halfWidth+1, 3);
 
     if(N < minRequired)
     {
