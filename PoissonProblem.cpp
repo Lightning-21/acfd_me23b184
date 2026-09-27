@@ -22,6 +22,11 @@
 // separate copy as a baseline, and reports iterations and error
 // against phi_exact for both.
 //
+// Also logs the residual norm after every sweep (plain GS) / every
+// cycle (MultiGrid), on the same fixed case, to
+// gs_residual_history.csv and mg_residual_history.csv, for the
+// convergence-history plot (Section 4.4 of the report).
+//
 // Compilation Instruction:
 // g++ PoissonProblem.cpp src/*.cpp -Iinclude -std=c++17 -o poissonProblem && ./poissonProblem
 //------------------------------------------------------------//
@@ -32,6 +37,7 @@
 #include "MultiGrid.h"
 
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <cmath>
 #include <vector>
@@ -183,6 +189,62 @@ int main()
         cout << "Plain GS   : iters  = " << gsIters
              << ", max error = " << scientific << setprecision(4) << gsMaxErr
              << ", L2 error = " << gsL2Err << endl;
+
+        // Residual history: plain GS, one row per sweep --------------
+
+        vector<double> phiHistGS(Nx*Ny, 0.0);
+        ofstream gsFile("gs_residual_history.csv");
+        gsFile << "iteration,residual\n";
+
+        double gsRes = GaussSeidel::residualNorm(phiHistGS, f, Nx, Ny, dx, dy, stencil.offsets);
+        gsFile << 0 << "," << gsRes << "\n";
+
+        int gsHistIter = 0;
+        while(gsRes > tol && gsHistIter < 20000)
+        {
+            GaussSeidel::sweep(phiHistGS, f, Nx, Ny, dx, dy, stencil.offsets);
+            gsHistIter++;
+            gsRes = GaussSeidel::residualNorm(phiHistGS, f, Nx, Ny, dx, dy, stencil.offsets);
+            gsFile << gsHistIter << "," << gsRes << "\n";
+        }
+        gsFile.close();
+
+        cout << endl << "GS residual history -> gs_residual_history.csv ("
+             << gsHistIter << " sweeps)" << endl;
+
+        // Residual history: MultiGrid, one row per cycle --------------
+        // (repeatedly calls MultiGrid::solve with maxCycles = 1, which
+        // resumes from the current phi each time, so one cycle runs
+        // per call.)
+
+        vector<double> phiHistMG(Nx*Ny, 0.0);
+        ofstream mgFile("mg_residual_history.csv");
+        mgFile << "cycle,residual\n";
+
+        double mgRes = GaussSeidel::residualNorm(phiHistMG, f, Nx, Ny, dx, dy, stencil.offsets);
+        mgFile << 0 << "," << mgRes << "\n";
+
+        int mgHistCycle = 0;
+        while(mgRes > tol && mgHistCycle < maxCycles)
+        {
+            MultiGrid::solve
+            (
+                cycleType, numLevels,
+                phiHistMG, f,
+                Nx, Ny, dx, dy,
+                stencil.offsets,
+                1, tol,
+                nu1, nu2
+            );
+
+            mgHistCycle++;
+            mgRes = GaussSeidel::residualNorm(phiHistMG, f, Nx, Ny, dx, dy, stencil.offsets);
+            mgFile << mgHistCycle << "," << mgRes << "\n";
+        }
+        mgFile.close();
+
+        cout << "MG residual history -> mg_residual_history.csv ("
+             << mgHistCycle << " cycles)" << endl;
     }
     catch(const exception& e)
     {
