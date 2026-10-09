@@ -31,12 +31,15 @@ enum class PrecondSide
 //--------------------------------------------------
 // Preconditioner
 //
-// Convention: the preconditioned operator is
-// M1^-1 * A * M2^-1, with M = M1 * M2.
+// Convention: M = M1 * M2, and the system A u = b is
+// solved through
 //
-//   Left  : M1 = M,  M2 = I
-//   Right : M1 = I,  M2 = M
-//   Split : M1 * M2 = M (natural factor pair of M)
+//   Left  : M1^-1 A u = M1^-1 b
+//           (M1 = M, M2 = I)
+//   Right : A M2^-1 v = b,  u = M2^-1 v
+//           (M1 = I, M2 = M)
+//   Split : M1^-1 A M2^-1 v = M1^-1 b,  u = M2^-1 v
+//           (M1 * M2 = M)
 //
 // Internally M = F1 * F2 (factor pair); M1 and M2 are
 // assembled from it for the effective mode.
@@ -109,21 +112,29 @@ std::vector<std::vector<double>> identityMatrix(int n);
 // Setup
 //
 // Each function returns a Preconditioner holding M1 and
-// M2 for the requested mode.
+// M2 for the requested mode. Splits follow the lecture
+// notes, M = M1 M2:
 //
-// Plain Gauss-Seidel and SOR have no natural split, so
-// Split falls back to Left. Jacobi and symmetric
-// Gauss-Seidel split need a positive diagonal, otherwise
-// they also fall back to Left.
+//   Jacobi       : M = D
+//                  M1 = D,  M2 = I
+//   Gauss-Seidel : M = D + L
+//                  M1 = D + L,  M2 = I
+//   Symmetric GS : M = (D + L) D^-1 (D + U)
+//                  M1 = D + L,  M2 = D^-1 (D + U)
+//   SOR          : M = D/omega + L
+//                  M1 = D/omega + L,  M2 = I
+//   LU           : A = L U (no pivoting)
+//                  M1 = L,  M2 = U
+//   Cholesky     : A = L L^T
+//                  M1 = L,  M2 = L^T
+//   ILU(0)       : LU on the pattern of A
+//                  M1 = L,  M2 = U
+//   IC(0)        : Cholesky on the pattern of A
+//                  M1 = L,  M2 = L^T
 //
-//   Jacobi               : M = D
-//   Gauss-Seidel         : M = D + L
-//   Symmetric GS         : M = (D + L) D^-1 (D + U)
-//   SOR                  : M = D/omega + L
-//   LU                   : A = L U (no pivoting)
-//   Cholesky             : A = L L^T
-//   ILU(0)               : LU on the pattern of A
-//   IC(0)                : Cholesky on the pattern of A
+// When M2 = I (Jacobi, Gauss-Seidel, SOR) a Split request
+// is the same as Left. It is reported as effective mode
+// Left, and requestedMode keeps Split.
 //--------------------------------------------------
 
 Preconditioner setupJacobi
