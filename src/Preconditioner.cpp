@@ -93,19 +93,6 @@ static vector<double> diagonalOf(const vector<vector<double>>& A)
     return d;
 }
 
-static bool allPositive(const vector<double>& d)
-{
-    for(double v : d)
-    {
-        if(v <= 0.0)
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 static void requireSize(const Preconditioner& P, const vector<double>& r)
 {
     if(static_cast<int>(r.size()) != P.n)
@@ -478,27 +465,19 @@ Preconditioner setupJacobi
 {
     Preconditioner P = makePrecond(PrecondMethod::Jacobi, mode, A, 1.0);
 
+    // M = D has no factor pair, so M2 = I and Split is the same as Left
+    P.mode = noSplit(mode);
+
     vector<double> d = diagonalOf(A);
 
-    if(P.mode == PrecondMode::Split && !allPositive(d))
-    {
-        P.mode = PrecondMode::Left;
-    }
-
-    bool split = (P.mode == PrecondMode::Split);
-
     P.F1 = zeros(P.n);
-    P.F2 = identityMatrix(P.n);
 
     for(int i = 0; i < P.n; i++)
     {
-        P.F1[i][i] = split ? sqrt(d[i]) : d[i];
-
-        if(split)
-        {
-            P.F2[i][i] = P.F1[i][i];
-        }
+        P.F1[i][i] = d[i];
     }
+
+    P.F2 = identityMatrix(P.n);
 
     finalize(P);
 
@@ -544,30 +523,24 @@ Preconditioner setupSymmetricGaussSeidel
 {
     Preconditioner P = makePrecond(PrecondMethod::SymmetricGaussSeidel, mode, A, 1.0);
 
-    vector<double> d = diagonalOf(A);
-
-    if(P.mode == PrecondMode::Split && !allPositive(d))
-    {
-        P.mode = PrecondMode::Left;
-    }
-
-    bool split = (P.mode == PrecondMode::Split);
+    // Zero-diagonal guard
+    diagonalOf(A);
 
     P.F1 = zeros(P.n);
     P.F2 = zeros(P.n);
 
     for(int i = 0; i < P.n; i++)
     {
-        // F1 = (D+L) D^-1, or (D+L) D^-1/2 when split
+        // F1 = D + L
         for(int j = 0; j <= i; j++)
         {
-            P.F1[i][j] = A[i][j]/(split ? sqrt(d[j]) : d[j]);
+            P.F1[i][j] = A[i][j];
         }
 
-        // F2 = (D+U), or D^-1/2 (D+U) when split
+        // F2 = D^-1 (D + U), unit diagonal
         for(int j = i; j < P.n; j++)
         {
-            P.F2[i][j] = split ? A[i][j]/sqrt(d[i]) : A[i][j];
+            P.F2[i][j] = A[i][j]/A[i][i];
         }
     }
 
@@ -680,6 +653,7 @@ Preconditioner setupIC0
 // Apply
 //------------------------------------------------------------//
 
+// F2 is the identity for Jacobi, so only F1 is ever applied.
 vector<double> applyJacobiPreconditioner
 (
     const Preconditioner& P,
@@ -694,19 +668,7 @@ vector<double> applyJacobiPreconditioner
 
     activeFactors(P.mode, side, useF1, useF2);
 
-    vector<double> z = r;
-
-    if(useF1)
-    {
-        z = diagonalSolve(P.F1, z);
-    }
-
-    if(useF2)
-    {
-        z = diagonalSolve(P.F2, z);
-    }
-
-    return z;
+    return useF1 ? diagonalSolve(P.F1, r) : r;
 }
 
 // F2 is the identity for Gauss-Seidel and SOR, so only F1 is
