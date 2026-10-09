@@ -6,9 +6,10 @@
 // Krylov subspace solvers for dense Ax = b: Steepest Descent,
 // Conjugate Gradient (CG) and Bi-Conjugate Gradient Stabilized
 // (BiCGSTAB), all usable with the preconditioners in
-// Preconditioners.h. A single entry point, solveKrylov, picks
-// the method from the user's choice or from the matrix itself
-// (SPD -> CG, otherwise BiCGSTAB).
+// Preconditioner.h. A single entry point, solveKrylov, picks
+// the method from the user's choice or, for Auto, from the
+// matrix itself via MatrixAnalysis.h (SPD -> CG, otherwise
+// BiCGSTAB).
 //
 // Steepest Descent and CG are written in preconditioned form
 // with z = M^-1 r, so Left / Right / Split give identical
@@ -20,13 +21,13 @@
 
 #include "KrylovSolvers.h"
 
+#include "MatrixAnalysis.h"
 #include "MatrixFunctions.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <functional>
 #include <stdexcept>
 #include <string>
 
@@ -125,13 +126,7 @@ static vector<double> initialGuess
 {
     size_t n = A.size();
 
-    for(const auto& row : A)
-    {
-        if(row.size() != n)
-        {
-            throw invalid_argument("matrix must be square");
-        }
-    }
+    requireSquare(A);
 
     if(b.size() != n)
     {
@@ -191,212 +186,6 @@ static void finish
     R.trueRelResidual = norm2(axpy(-1.0, matVec(A, x), b))/norm2(b);
 
     R.seconds = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-}
-
-// Dense Cholesky attempt on the lower triangle
-static bool isSPD(const vector<vector<double>>& A)
-{
-    int n = static_cast<int>(A.size());
-
-    vector<vector<double>> L(A.size(), vector<double>(A.size(), 0.0));
-
-    for(int j = 0; j < n; j++)
-    {
-        double s = A[j][j];
-
-        for(int k = 0; k < j; k++)
-        {
-            s -= L[j][k]*L[j][k];
-        }
-
-        if(!(s > 0.0))
-        {
-            return false;
-        }
-
-        L[j][j] = sqrt(s);
-
-        for(int i = j+1; i < n; i++)
-        {
-            double t = A[i][j];
-
-            for(int k = 0; k < j; k++)
-            {
-                t -= L[i][k]*L[j][k];
-            }
-
-            L[i][j] = t/L[j][j];
-        }
-    }
-
-    return true;
-}
-
-// Largest eigenvalue of a symmetric positive semi-definite
-// operator by power iteration (Rayleigh quotient, fixed
-// pseudo-random start vector so results are reproducible)
-static double dominantEigenvalue
-(
-    const function<vector<double>(const vector<double>&)>& op,
-    int n
-)
-{
-    vector<double> v(n);
-
-    unsigned s = 12345u;
-
-    for(int i = 0; i < n; i++)
-    {
-        s = s*1103515245u + 12345u;
-
-        v[i] = 0.5 + static_cast<double>((s >> 8) & 0xFFFF)/65536.0;
-    }
-
-    double nv = norm2(v);
-
-    for(double& x : v)
-    {
-        x /= nv;
-    }
-
-    double lambda = 0.0;
-
-    for(int k = 0; k < 2000; k++)
-    {
-        vector<double> w = op(v);
-
-        double lambdaNew = dot(v, w);
-
-        double nw = norm2(w);
-
-        if(nw == 0.0)
-        {
-            return 0.0;
-        }
-
-        for(int i = 0; i < n; i++)
-        {
-            v[i] = w[i]/nw;
-        }
-
-        if(k > 0 && fabs(lambdaNew - lambda) <= 1e-9*fabs(lambdaNew))
-        {
-            return lambdaNew;
-        }
-
-        lambda = lambdaNew;
-    }
-
-    return lambda;
-}
-
-//------------------------------------------------------------//
-// Matrix Checks
-//------------------------------------------------------------//
-
-MatrixInfo analyzeMatrix
-(
-    const vector<vector<double>>& A,
-    bool estimateCondition
-)
-{
-    MatrixInfo info;
-
-    size_t n = A.size();
-
-    for(const auto& row : A)
-    {
-        if(row.size() != n)
-        {
-            throw invalid_argument("matrix must be square");
-        }
-    }
-
-    info.n = static_cast<int>(n);
-
-    double amax = 0.0;
-    double asym = 0.0;
-
-    for(size_t i = 0; i < n; i++)
-    {
-        for(size_t j = 0; j < n; j++)
-        {
-            amax = max(amax, fabs(A[i][j]));
-            asym = max(asym, fabs(A[i][j] - A[j][i]));
-        }
-    }
-
-    info.symmetric = (asym <= 1e-12*amax);
-
-    info.spd = info.symmetric && isSPD(A);
-
-    if(estimateCondition)
-    {
-        info.conditionEstimate = estimateConditionNumber(A);
-    }
-
-    return info;
-}
-
-double estimateConditionNumber(const vector<vector<double>>& A)
-{
-    int n = static_cast<int>(A.size());
-
-    if(n == 0)
-    {
-        return -1.0;
-    }
-
-    Preconditioner lu;
-
-    try
-    {
-        // M1 = L (unit lower), M2 = U
-        lu = setupLU(A, PrecondMode::Split);
-    }
-    catch(const runtime_error&)
-    {
-        return -1.0;
-    }
-
-    vector<vector<double>> At = transposeMatrix(A);
-    vector<vector<double>> Ut = transposeMatrix(lu.F2);
-    vector<vector<double>> Lt = transposeMatrix(lu.F1);
-
-    // sigma_max^2 = lambda_max(A^T A)
-    double lamMax = dominantEigenvalue
-    (
-        [&](const vector<double>& v)
-        {
-            return matVec(At, matVec(A, v));
-        },
-        n
-    );
-
-    // 1 / sigma_min^2 = lambda_max((A^T A)^-1), with
-    // (A^T A)^-1 = A^-1 A^-T and A^-T = L^-T U^-T
-    double invLamMin = dominantEigenvalue
-    (
-        [&](const vector<double>& v)
-        {
-            vector<double> w = backwardSolve(Lt, forwardSolve(Ut, v));
-
-            return backwardSolve(lu.F2, forwardSolve(lu.F1, w));
-        },
-        n
-    );
-
-    if(!(lamMax > 0.0) || !(invLamMin > 0.0))
-    {
-        return -1.0;
-    }
-
-    return sqrt(lamMax*invLamMin);
-}
-
-KrylovMethod chooseMethod(const MatrixInfo& info)
-{
-    return info.spd ? KrylovMethod::CG : KrylovMethod::BiCGSTAB;
 }
 
 //------------------------------------------------------------//

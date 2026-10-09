@@ -6,7 +6,8 @@
 // General dense matrix and vector helpers shared by the
 // preconditioners and the Krylov solvers: dot product, 2-norm,
 // axpy, zero / identity / transpose, matrix-matrix and
-// matrix-vector products, and diagonal / triangular solves.
+// matrix-vector products, diagonal / triangular solves, the
+// square-matrix check and the Cholesky factorisation.
 //
 //------------------------------------------------------------//
 
@@ -216,4 +217,69 @@ vector<double> diagonalSolve
     }
 
     return z;
+}
+
+void requireSquare(const vector<vector<double>>& A)
+{
+    for(const auto& row : A)
+    {
+        if(row.size() != A.size())
+        {
+            throw invalid_argument("matrix must be square");
+        }
+    }
+}
+
+//------------------------------------------------------------//
+// Cholesky Factor
+//------------------------------------------------------------//
+
+// A = L L^T, using the lower part of A. usePattern = true
+// drops fill outside the lower pattern of A (IC(0)).
+vector<vector<double>> choleskyFactor
+(
+    const vector<vector<double>>& A,
+    bool usePattern
+)
+{
+    int n = static_cast<int>(A.size());
+
+    vector<vector<double>> L = zeros(n);
+
+    for(int j = 0; j < n; j++)
+    {
+        double s = A[j][j];
+
+        for(int k = 0; k < j; k++)
+        {
+            s -= L[j][k]*L[j][k];
+        }
+
+        // Negated test so a NaN pivot is rejected too
+        if(!(s > 0.0))
+        {
+            throw runtime_error("non-positive pivot: matrix is not SPD");
+        }
+
+        L[j][j] = sqrt(s);
+
+        for(int i = j+1; i < n; i++)
+        {
+            if(usePattern && A[i][j] == 0.0)
+            {
+                continue;
+            }
+
+            double t = A[i][j];
+
+            for(int k = 0; k < j; k++)
+            {
+                t -= L[i][k]*L[j][k];
+            }
+
+            L[i][j] = t/L[j][j];
+        }
+    }
+
+    return L;
 }

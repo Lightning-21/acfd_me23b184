@@ -37,6 +37,8 @@ std::vector<double> axpy
 // forwardSolve   : solves L z = r, L lower triangular
 // backwardSolve  : solves U z = r, U upper triangular
 // diagonalSolve  : solves D z = r, uses diag(D) only
+// requireSquare  : throws std::invalid_argument unless every
+//                  row of A has A.size() entries
 //--------------------------------------------------
 
 std::vector<std::vector<double>> zeros(int n);
@@ -76,6 +78,28 @@ std::vector<double> diagonalSolve
 (
     const std::vector<std::vector<double>>& D,
     const std::vector<double>& r
+);
+
+void requireSquare(const std::vector<std::vector<double>>& A);
+
+//--------------------------------------------------
+// Cholesky Factor
+//
+// choleskyFactor returns the lower triangle L with
+// A = L L^T, reading only the lower part of A.
+//
+// usePattern = true drops fill outside the lower
+// pattern of A (IC(0)).
+//
+// Throws std::runtime_error at the first pivot that is
+// not strictly positive (or is NaN), i.e. when A is not
+// SPD.
+//--------------------------------------------------
+
+std::vector<std::vector<double>> choleskyFactor
+(
+    const std::vector<std::vector<double>>& A,
+    bool usePattern
 );
 
 #endif
