@@ -6,7 +6,7 @@
 // Krylov subspace solvers for dense Ax = b: Steepest Descent,
 // Conjugate Gradient (CG) and Bi-Conjugate Gradient Stabilized
 // (BiCGSTAB), all usable with the preconditioners in
-// Preconditioner.h. A single entry point, solveKrylov, picks
+// Preconditioners.h. A single entry point, solveKrylov, picks
 // the method from the user's choice or from the matrix itself
 // (SPD -> CG, otherwise BiCGSTAB).
 //
@@ -19,6 +19,8 @@
 //------------------------------------------------------------//
 
 #include "KrylovSolvers.h"
+
+#include "MatrixFunctions.h"
 
 #include <algorithm>
 #include <chrono>
@@ -33,41 +35,6 @@ using namespace std;
 //------------------------------------------------------------//
 // File-Local Helpers
 //------------------------------------------------------------//
-
-static double dot(const vector<double>& a, const vector<double>& b)
-{
-    double s = 0.0;
-
-    for(size_t i = 0; i < a.size(); i++)
-    {
-        s += a[i]*b[i];
-    }
-
-    return s;
-}
-
-static double norm2(const vector<double>& a)
-{
-    return sqrt(dot(a, a));
-}
-
-// Returns y + a*x
-static vector<double> axpy
-(
-    double a,
-    const vector<double>& x,
-    const vector<double>& y
-)
-{
-    vector<double> z(y);
-
-    for(size_t i = 0; i < z.size(); i++)
-    {
-        z[i] += a*x[i];
-    }
-
-    return z;
-}
 
 // True if |d| is negligible compared with the product of the
 // two norms, i.e. the cosine between the vectors is about 0

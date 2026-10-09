@@ -69,46 +69,6 @@ struct Preconditioner
 };
 
 //--------------------------------------------------
-// Dense Helpers
-//
-// matVec        : y = A x
-// forwardSolve  : solves L z = r, L lower triangular
-// backwardSolve : solves U z = r, U upper triangular
-// diagonalSolve : solves D z = r, uses diag(D) only
-//--------------------------------------------------
-
-std::vector<double> matVec
-(
-    const std::vector<std::vector<double>>& A,
-    const std::vector<double>& x
-);
-
-std::vector<double> forwardSolve
-(
-    const std::vector<std::vector<double>>& L,
-    const std::vector<double>& r
-);
-
-std::vector<double> backwardSolve
-(
-    const std::vector<std::vector<double>>& U,
-    const std::vector<double>& r
-);
-
-std::vector<double> diagonalSolve
-(
-    const std::vector<std::vector<double>>& D,
-    const std::vector<double>& r
-);
-
-std::vector<std::vector<double>> transposeMatrix
-(
-    const std::vector<std::vector<double>>& A
-);
-
-std::vector<std::vector<double>> identityMatrix(int n);
-
-//--------------------------------------------------
 // Setup
 //
 // Each function returns a Preconditioner holding M1 and
