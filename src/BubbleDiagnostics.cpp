@@ -9,12 +9,13 @@
 // the spurious-current speed and the pressure jump of a static
 // drop, plus a history that keeps them over time.
 //
-// Area, centre of mass and rise velocity are weighted integrals
-// over the cells with the bubble indicator 1 - H(phi). The
-// interface length is the length of the phi = 0 contour found by
-// marching squares on the cell-centre grid with linear
-// interpolation, which is more accurate than integrating the
-// smoothed delta function.
+// Area and interface length belong to the sharp phi = 0 contour,
+// found by marching squares on the cell-centre grid with linear
+// interpolation. Using the area of the smoothed indicator
+// 1 - H(phi) instead would be too large by about 0.41 eps^2 for a
+// circle, which puts the circularity of a round bubble above 1.
+// Centre of mass and rise velocity are ratios of integrals over
+// the cells weighted with that smoothed indicator.
 //
 //------------------------------------------------------------//
 
@@ -34,7 +35,7 @@ using namespace std;
 
 namespace
 {
-    double distance
+    double segmentLength
     (
         double x1,
         double y1,
@@ -145,7 +146,7 @@ namespace
                 }
             }
 
-            return distance(px[first], py[first], px[second], py[second]);
+            return segmentLength(px[first], py[first], px[second], py[second]);
         }
 
         if(count == 4)
@@ -157,16 +158,170 @@ namespace
             if((centre < 0.0) == (f00 < 0.0))
             {
                 // corners (I+1,J) and (I,J+1) cut off
-                return distance(px[0], py[0], px[1], py[1])
-                     + distance(px[2], py[2], px[3], py[3]);
+                return segmentLength(px[0], py[0], px[1], py[1])
+                     + segmentLength(px[2], py[2], px[3], py[3]);
             }
 
             // corners (I,J) and (I+1,J+1) cut off
-            return distance(px[3], py[3], px[0], py[0])
-                 + distance(px[1], py[1], px[2], py[2]);
+            return segmentLength(px[3], py[3], px[0], py[0])
+                 + segmentLength(px[1], py[1], px[2], py[2]);
         }
 
         return 0.0;
+    }
+
+    // Area of the part of the square (corners at the cell centres
+    // (I,J), (I+1,J), (I,J+1), (I+1,J+1)) where phi < 0, with phi
+    // linear along each edge
+    double squareNegativeArea
+    (
+        const LevelSet& level,
+        int I,
+        int J
+    )
+    {
+        double x0 = level.xc(I);
+        double y0 = level.yc(J);
+        double x1 = x0 + level.dx;
+        double y1 = y0 + level.dy;
+
+        // Corners in counter-clockwise order
+        double f[4] =
+        {
+            level.phi[level.idx(I, J)],
+            level.phi[level.idx(I+1, J)],
+            level.phi[level.idx(I+1, J+1)],
+            level.phi[level.idx(I, J+1)]
+        };
+
+        double cx[4] = {x0, x1, x1, x0};
+        double cy[4] = {y0, y0, y1, y1};
+
+        int negative = 0;
+
+        for(int k = 0; k < 4; k++)
+        {
+            if(f[k] < 0.0)
+            {
+                negative++;
+            }
+        }
+
+        if(negative == 0)
+        {
+            return 0.0;
+        }
+
+        if(negative == 4)
+        {
+            return level.dx*level.dy;
+        }
+
+        // Crossing point on edge e, between corner e and e+1
+        bool crossed[4];
+
+        double ex[4];
+        double ey[4];
+
+        int crossings = 0;
+
+        for(int e = 0; e < 4; e++)
+        {
+            int a = e;
+            int b = (e+1)%4;
+
+            crossed[e] = ((f[a] < 0.0) != (f[b] < 0.0));
+
+            ex[e] = 0.0;
+            ey[e] = 0.0;
+
+            if(crossed[e])
+            {
+                double t = f[a]/(f[a] - f[b]);
+
+                ex[e] = cx[a] + t*(cx[b] - cx[a]);
+                ey[e] = cy[a] + t*(cy[b] - cy[a]);
+
+                crossings++;
+            }
+        }
+
+        // Saddle whose negative corners are not joined through the
+        // centre: one triangle at each negative corner
+        if(crossings == 4 && 0.25*(f[0] + f[1] + f[2] + f[3]) >= 0.0)
+        {
+            double total = 0.0;
+
+            for(int k = 0; k < 4; k++)
+            {
+                if(f[k] < 0.0)
+                {
+                    int eNext = k;
+                    int ePrev = (k+3)%4;
+
+                    double ax = ex[eNext] - cx[k];
+                    double ay = ey[eNext] - cy[k];
+                    double bx = ex[ePrev] - cx[k];
+                    double by = ey[ePrev] - cy[k];
+
+                    total += 0.5*fabs(ax*by - ay*bx);
+                }
+            }
+
+            return total;
+        }
+
+        // One polygon: the negative corners and the crossing points,
+        // in order around the square
+        double px[8];
+        double py[8];
+
+        int m = 0;
+
+        for(int e = 0; e < 4; e++)
+        {
+            if(f[e] < 0.0)
+            {
+                px[m] = cx[e];
+                py[m] = cy[e];
+                m++;
+            }
+
+            if(crossed[e])
+            {
+                px[m] = ex[e];
+                py[m] = ey[e];
+                m++;
+            }
+        }
+
+        double twice = 0.0;
+
+        for(int k = 0; k < m; k++)
+        {
+            int next = (k+1)%m;
+
+            twice += px[k]*py[next] - px[next]*py[k];
+        }
+
+        return 0.5*fabs(twice);
+    }
+
+    // Area enclosed by the phi = 0 contour, between the first and
+    // last cell centres
+    double bubbleArea(const LevelSet& level)
+    {
+        double area = 0.0;
+
+        for(int J = 0; J < level.Ny-1; J++)
+        {
+            for(int I = 0; I < level.Nx-1; I++)
+            {
+                area += squareNegativeArea(level, I, J);
+            }
+        }
+
+        return area;
     }
 
     double interfaceLength(const LevelSet& level)
@@ -207,7 +362,9 @@ BubbleState measureBubble(const TwoPhaseFlow& flow)
 
     double cellArea = flow.dx*flow.dy;
 
-    double area = 0.0;
+    // Smoothed weights, for the ratios (centre of mass, rise
+    // velocity) only
+    double weight = 0.0;
     double sumX = 0.0;
     double sumY = 0.0;
     double sumV = 0.0;
@@ -223,7 +380,7 @@ BubbleState measureBubble(const TwoPhaseFlow& flow)
             double uc = 0.5*(flow.u[flow.uIdx(I, J)] + flow.u[flow.uIdx(I+1, J)]);
             double vc = 0.5*(flow.v[flow.vIdx(I, J)] + flow.v[flow.vIdx(I, J+1)]);
 
-            area += w;
+            weight += w;
             sumX += w*level.xc(I);
             sumY += w*level.yc(J);
             sumV += w*vc;
@@ -234,23 +391,25 @@ BubbleState measureBubble(const TwoPhaseFlow& flow)
 
     BubbleState s;
 
+    double area = bubbleArea(level);
+
     s.time = flow.time;
     s.area = area;
     s.maxSpeed = maxSpeed;
     s.perimeter = interfaceLength(level);
 
-    if(area > 0.0)
+    if(weight > 0.0)
     {
-        s.xc = sumX/area;
-        s.yc = sumY/area;
-        s.vRise = sumV/area;
+        s.xc = sumX/weight;
+        s.yc = sumY/weight;
+        s.vRise = sumV/weight;
+    }
 
+    if(area > 0.0 && s.perimeter > 0.0)
+    {
         double dEquivalent = sqrt(4.0*area/pi);
 
-        if(s.perimeter > 0.0)
-        {
-            s.circularity = pi*dEquivalent/s.perimeter;
-        }
+        s.circularity = pi*dEquivalent/s.perimeter;
     }
 
     return s;

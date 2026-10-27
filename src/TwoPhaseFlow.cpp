@@ -85,7 +85,8 @@ TwoPhaseFlow::TwoPhaseFlow
         (
             "TwoPhaseFlow: "+to_string(n)+" unknowns exceed the limit of "+
             to_string(maxUnknowns)+"; the dense pressure matrix would need "+
-            to_string((double)n*(double)n*8.0/1.0e9)+" GB."
+            to_string((double)n*(double)n*8.0/1.0e9)+" GB, and about five times "+
+            "that with a dense preconditioner."
         );
     }
 
@@ -547,16 +548,7 @@ void TwoPhaseFlow::step
         throw invalid_argument("TwoPhaseFlow::step: dt must be positive.");
     }
 
-    // Interface, then the properties that follow from it
-    level.advect(u, v, dt);
-
-    stepCount++;
-
-    if(params.reinitEvery > 0 && stepCount%params.reinitEvery == 0)
-    {
-        level.reinitialise(params.reinitSteps);
-    }
-
+    // Properties from the current interface
     computeProperties();
 
     // Predictor, pressure solve, correction
@@ -577,6 +569,17 @@ void TwoPhaseFlow::step
     p = r.x;
 
     correctVelocity(dt, us, vs);
+
+    // Interface: advected with the new, divergence-free velocity
+    // and then reinitialised
+    level.advect(u, v, dt);
+
+    stepCount++;
+
+    if(params.reinitEvery > 0 && stepCount%params.reinitEvery == 0)
+    {
+        level.reinitialise(params.reinitSteps);
+    }
 
     time += dt;
 

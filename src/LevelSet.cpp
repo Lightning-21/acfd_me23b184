@@ -10,10 +10,15 @@
 //
 //   Advection        : first-order upwind, 3rd-order TVD RK
 //   Reinitialisation : Sussman-Smereka-Osher pseudo-time PDE,
-//                      Godunov upwind |grad(phi)|
+//                      Godunov upwind |grad(phi)|, dtau = dx/10
 //   Interface        : smoothed Heaviside / delta of half-width
 //                      eps, density and viscosity fields,
 //                      curvature and continuum surface force
+//
+// Formulas follow A. Sharma, Sadhana 40(3), 2015, Eqs. (1)-(4),
+// (7), (9) and (11): n = grad(phi)/|grad(phi)|, kappa = -div(n),
+// H_eps and delta_eps with 2 eps = 3 dx, rho_m = H + chi (1 - H),
+// phi_tau = S_eps(phi0) (1 - |grad(phi)|), F = sigma kappa n delta.
 //
 // Sign convention: phi > 0 in the liquid, phi < 0 in the bubble.
 //
@@ -306,13 +311,27 @@ void LevelSet::advect
 // Reinitialisation
 //------------------------------------------------------------//
 
-double LevelSet::reinitialise(int nSteps)
+double LevelSet::reinitialise
+(
+    int nSteps,
+    double dtauFactor
+)
 {
+    if(nSteps < 0)
+    {
+        throw invalid_argument("LevelSet::reinitialise: nSteps must not be negative.");
+    }
+
+    if(dtauFactor <= 0.0)
+    {
+        throw invalid_argument("LevelSet::reinitialise: dtauFactor must be positive.");
+    }
+
     int n = Nx*Ny;
 
     double h = min(dx, dy);
 
-    double dtau = 0.5*h;
+    double dtau = dtauFactor*h;
 
     // Smoothed sign of the initial field, held fixed
     vector<double> S(n);
@@ -475,7 +494,7 @@ void LevelSet::curvature(vector<double>& kappa) const
     {
         for(int I = 0; I < Nx; I++)
         {
-            kappa[idx(I, J)] = ddx(nx, I, J) + ddy(ny, I, J);
+            kappa[idx(I, J)] = -(ddx(nx, I, J) + ddy(ny, I, J));
         }
     }
 }
@@ -508,11 +527,15 @@ void LevelSet::surfaceForce
 
             double dphidx = (phi[kR] - phi[kL])/dx;
 
+            double dphidy = 0.5*(ddy(phi, i-1, J) + ddy(phi, i, J));
+
+            double mag = max(sqrt(dphidx*dphidx + dphidy*dphidy), 1.0e-12);
+
             double kappaF = 0.5*(kappa[kL] + kappa[kR]);
 
             double phiF = 0.5*(phi[kL] + phi[kR]);
 
-            fu[J*(Nx+1) + i] = -sigma*kappaF*smoothedDelta(phiF)*dphidx;
+            fu[J*(Nx+1) + i] = sigma*kappaF*smoothedDelta(phiF)*dphidx/mag;
         }
     }
 
@@ -526,11 +549,15 @@ void LevelSet::surfaceForce
 
             double dphidy = (phi[kN] - phi[kS])/dy;
 
+            double dphidx = 0.5*(ddx(phi, I, j-1) + ddx(phi, I, j));
+
+            double mag = max(sqrt(dphidx*dphidx + dphidy*dphidy), 1.0e-12);
+
             double kappaF = 0.5*(kappa[kS] + kappa[kN]);
 
             double phiF = 0.5*(phi[kS] + phi[kN]);
 
-            fv[j*Nx + I] = -sigma*kappaF*smoothedDelta(phiF)*dphidy;
+            fv[j*Nx + I] = sigma*kappaF*smoothedDelta(phiF)*dphidy/mag;
         }
     }
 }

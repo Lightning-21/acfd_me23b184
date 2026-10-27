@@ -11,10 +11,12 @@
 //
 // The quantities of the rising bubble benchmark, measured
 // from a TwoPhaseFlow at one instant. The bubble is the
-// region phi < 0; its indicator is 1 - H(phi) with the
-// smoothed Heaviside of the level set.
+// region phi < 0. The centre of mass and rise velocity use the
+// smoothed indicator 1 - H(phi) of the level set as weight; the
+// area and perimeter belong to the sharp phi = 0 contour.
 //
-//   area       : integral of (1 - H(phi)) over the domain
+//   area       : area enclosed by the phi = 0 contour (marching
+//                squares, linear interpolation of phi)
 //   xc, yc     : centre of mass of the bubble
 //                  yc = int y (1 - H) dA / int (1 - H) dA
 //   vRise      : mean vertical velocity of the bubble

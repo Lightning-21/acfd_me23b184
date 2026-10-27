@@ -17,6 +17,10 @@
 //   FreeSlip : zero tangential shear stress at the wall
 //
 // Moving walls are not supported.
+//
+// The defaults are those of the rising bubble benchmark of
+// Hysing et al. (2009): no-slip on the top and bottom walls,
+// free-slip on the two vertical walls.
 //--------------------------------------------------
 
 enum class WallType
@@ -27,9 +31,9 @@ enum class WallType
 
 struct WallConditions
 {
-    WallType left = WallType::NoSlip;
+    WallType left = WallType::FreeSlip;
 
-    WallType right = WallType::NoSlip;
+    WallType right = WallType::FreeSlip;
 
     WallType bottom = WallType::NoSlip;
 
@@ -62,12 +66,18 @@ enum class TPConvection
 // gx, gy    : gravitational acceleration (a body force
 //             per unit mass, so gy = -g points down)
 //
-// The defaults are the values of the Hysing et al. test
-// case 1; check them against the paper before using them.
+// The defaults are the values of test case 1 of Hysing et al.
+// (2009), Table 1: rho1 = 1000, rho2 = 100, mu1 = 10, mu2 = 1,
+// g = 0.98, sigma = 24.5 (Re = 35, Eo = 10), on a 1 x 2 domain
+// with a bubble of radius 0.25 at (0.5, 0.5), run to t = 3.
 //
 // reinitEvery : reinitialise phi every this many steps
 //               (0 = never)
-// reinitSteps : pseudo-time steps per reinitialisation
+// reinitSteps : pseudo-time steps per reinitialisation, each of
+//               dtau = min(dx,dy)/10. The equation is marched
+//               until |grad(phi)| = 1 inside the interface
+//               thickness, so about eps/dtau = 15 steps are
+//               needed for eps = 1.5 dx.
 //--------------------------------------------------
 
 struct TwoPhaseParameters
@@ -92,7 +102,7 @@ struct TwoPhaseParameters
 
     int reinitEvery = 1;
 
-    int reinitSteps = 2;
+    int reinitSteps = 15;
 };
 
 //--------------------------------------------------
@@ -137,16 +147,18 @@ struct TwoPhaseStepInfo
 // u(0,J), u(Nx,J), v(I,0) and v(I,Ny) lie on the walls and
 // stay zero. Only the interior faces are unknowns.
 //
-// One time step (step):
+// One time step (step), in the order of the solution
+// algorithm of Sharma (2015), Sec. 2.3:
 //
-//   1. advect phi with u^n (LevelSet), reinitialise it
-//   2. density and viscosity from the new phi
-//   3. predictor, explicit Euler:
+//   1. density and viscosity from the current phi
+//   2. predictor, explicit Euler:
 //
 //        u* = u^n + dt [ - u.grad(u) + (1/rho) div(mu (grad u
 //             + grad u^T)) + g + F_sigma/rho ]
 //
-//   4. pressure Poisson equation
+//      The viscous term is div(2 mu D), D = (grad u +
+//      grad u^T)/2, and F_sigma = sigma kappa delta(phi) n.
+//   3. pressure Poisson equation
 //
 //        div( (1/rho) grad(p) ) = div(u*) / dt
 //
@@ -157,7 +169,8 @@ struct TwoPhaseStepInfo
 //      step and is DENSE (std::vector<std::vector<double>>),
 //      symmetric positive definite once the pressure of
 //      refCell is pinned to zero.
-//   5. correction  u^{n+1} = u* - dt (1/rho_f) grad(p)
+//   4. correction  u^{n+1} = u* - dt (1/rho_f) grad(p)
+//   5. advect phi with u^{n+1} (LevelSet), then reinitialise it
 //
 // The pressure solve goes through a SolverSelector, so the
 // Krylov method and preconditioner are chosen (and may be
@@ -216,9 +229,15 @@ public:
     //
     // Throws std::invalid_argument for Nx < 3, Ny < 3,
     // non-positive lengths or densities, negative viscosity or
-    // surface tension, and when Nx*Ny exceeds maxUnknowns:
-    // the dense pressure matrix needs 8 (Nx*Ny)^2 bytes. The
-    // default of 16000 unknowns is about 2 GB.
+    // surface tension, and when Nx*Ny exceeds maxUnknowns.
+    //
+    // Memory: the dense pressure matrix needs 8 (Nx*Ny)^2 bytes
+    // (about 2 GB for 16000 unknowns). A preconditioner built by
+    // buildPreconditioner stores four more dense matrices of the
+    // same size (F1, F2, M1, M2), also for Jacobi, so the peak
+    // while solving is about five times that: roughly 10 GB for
+    // 16000 unknowns and 6.6 GB for the 80 x 160 grid. Lower
+    // maxUnknowns to fit the machine.
     //--------------------------------------------------
 
     TwoPhaseFlow
@@ -306,8 +325,9 @@ public:
     //--------------------------------------------------
     // Time Step
     //
-    // Advances phi, u, v and p by dt (the steps listed above)
-    // and fills info. p is used as the initial guess of the
+    // Advances u, v, p and phi by dt (the steps listed above;
+    // rho and mu stay those of the old interface) and fills
+    // info. p is used as the initial guess of the
     // pressure solve. Throws std::invalid_argument for
     // dt <= 0.
     //--------------------------------------------------

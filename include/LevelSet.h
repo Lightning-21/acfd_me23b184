@@ -161,13 +161,25 @@ public:
     // with the smoothed sign S = phi0/sqrt(phi0^2 + h^2),
     // h = min(dx,dy), and the Godunov upwind approximation of
     // |grad(phi)|. Marched nSteps pseudo-time steps of
-    // dtau = min(dx,dy)/2 starting from the current phi (phi0).
+    // dtau = dtauFactor*min(dx,dy) starting from the current
+    // phi (phi0). The default dtauFactor = 1/10 is the pseudo
+    // time step of Sussman et al. (1994); the equation is to be
+    // marched until |grad(phi)| = 1 inside the interface
+    // thickness, so nSteps of about eps/dtau (15 for
+    // eps = 1.5 dx) are needed to repair the whole band.
+    //
+    // Throws std::invalid_argument for nSteps < 0 or
+    // dtauFactor <= 0.
     //
     // Returns the largest change of phi in the last step, as a
     // convergence monitor.
     //--------------------------------------------------
 
-    double reinitialise(int nSteps);
+    double reinitialise
+    (
+        int nSteps,
+        double dtauFactor = 0.1
+    );
 
     //--------------------------------------------------
     // Smoothed Heaviside and Delta
@@ -204,11 +216,14 @@ public:
     //--------------------------------------------------
     // Curvature
     //
-    //   kappa = div( grad(phi) / |grad(phi)| )
+    //   n     = grad(phi) / |grad(phi)|
+    //   kappa = - div(n)
     //
-    // at the cell centres (central differences, one-sided at
-    // the walls). With phi < 0 inside, kappa = +1/R on a circle
-    // of radius R. kappa is resized to Nx*Ny.
+    // the definition of Sharma (2015), Eq. 1, at the cell
+    // centres (central differences, one-sided at the walls).
+    // n points into the liquid (phi > 0), so with phi < 0
+    // inside kappa = -1/R on a circular bubble of radius R.
+    // kappa is resized to Nx*Ny.
     //--------------------------------------------------
 
     void curvature(std::vector<double>& kappa) const;
@@ -216,13 +231,20 @@ public:
     //--------------------------------------------------
     // Continuum Surface Force
     //
-    //   F = - sigma kappa delta(phi) grad(phi)
+    //   F = sigma kappa delta(phi) n
     //
-    // per unit volume, evaluated at the interior faces of the
-    // staggered grid: fu is the x-component on the u faces and
-    // fv the y-component on the v faces. Faces on the walls are
-    // set to zero. F points towards the centre of the bubble,
-    // so a static circular bubble has p_inside - p_outside =
+    // per unit volume, the surface tension term of Sharma
+    // (2015), Eq. 9, with the unit normal n and kappa as above.
+    // It is evaluated at the interior faces of the staggered
+    // grid: fu is the x-component on the u faces and fv the
+    // y-component on the v faces. Faces on the walls are set
+    // to zero. The normal component along the face direction is
+    // the compact difference of phi across the face (the same
+    // difference as the pressure gradient there) and is
+    // normalised with |grad(phi)| from that difference and the
+    // average of the two cell-centre values of the other
+    // component. F points towards the centre of the bubble, so
+    // a static circular bubble has p_inside - p_outside =
     // sigma/R when the momentum equation carries + F.
     //
     // fu is resized to (Nx+1)*Ny and fv to Nx*(Ny+1).
