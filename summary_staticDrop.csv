@@ -1,0 +1,2 @@
+N,solver,steps,time,sigma,R,jump,exact,relError,relErrorEq,maxSpeed,areaChange,totalIterations,status
+32,CG+IC0,200,0.0244140625,1,0.25,4.357571627,4,0.08939290684,0.005160341741,0.03159137204,-0.1458894485,8819,ok

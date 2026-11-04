@@ -95,6 +95,37 @@ std::string solverChoiceName(const SolverChoice& c);
 // downIters should be well below the iteration count the next
 // weaker candidate would need, otherwise the policy flips
 // back and forth between two candidates.
+//
+// Probe policy (alternative to the iteration-count policy; takes
+// precedence over it when both are set, needs >= 2 candidates)
+//
+// Instead of reacting to iteration counts, every candidate is
+// RUN on the current system down to the loose tolerance probeTol
+// and the cheapest one is kept:
+//
+//   cost = setup seconds + solve seconds  (preconditioner build
+//          plus Krylov iterations, to probeTol)
+//   work = matVecs + precondApplies       (tie-break)
+//
+// A candidate whose cost is within tieBand (relative) of the
+// best is treated as tied and the smaller work count wins. A
+// candidate that throws or does not reach probeTol is dropped
+// from that probe. The winner's probe solution is the initial
+// guess of the full-tolerance solve of the same step, and its
+// preconditioner is reused (no second setup).
+//
+// A probe is made at the first solve, every probeEvery solves,
+// after a solve that did not converge, and when the committed
+// solver's iteration count drifts above
+// max(driftFactor*ref, ref+5), where ref is its count on the
+// first normal solve after the last probe.
+//
+// probe       : true = use the probe policy
+// probeTol    : relative tolerance of the probe solves (raised to
+//               KrylovOptions::tol if that is looser)
+// probeEvery  : solves between two scheduled probes
+// driftFactor : iteration growth that triggers an extra probe
+// tieBand     : relative cost band treated as a tie
 //--------------------------------------------------
 
 struct SwitchPolicy
@@ -108,6 +139,16 @@ struct SwitchPolicy
     int patience = 3;
 
     int holdSteps = 5;
+
+    bool probe = false;
+
+    double probeTol = 1e-5;
+
+    int probeEvery = 50;
+
+    double driftFactor = 1.5;
+
+    double tieBand = 0.10;
 };
 
 //--------------------------------------------------
@@ -127,6 +168,14 @@ struct SwitchPolicy
 // fellBack     : the preconditioner setup of an earlier
 //                candidate failed in this step, so this
 //                result comes from the next one
+// probed       : this row is a probe solve (to probeTol), not
+//                the solve whose result the flow code used.
+//                A candidate that threw during a probe has
+//                status Breakdown and zero counts.
+// chosen       : probe row only; this candidate won the probe
+//
+// In probe mode a probe step writes one row per candidate
+// (probed = true) followed by the committed solve row.
 //--------------------------------------------------
 
 struct SolveRecord
@@ -154,6 +203,10 @@ struct SolveRecord
     bool switched = false;
 
     bool fellBack = false;
+
+    bool probed = false;
+
+    bool chosen = false;
 };
 
 //--------------------------------------------------
@@ -237,9 +290,12 @@ public:
     //--------------------------------------------------
     // Totals over the history
     //
-    // totalSeconds = setup + solve time. Work is counted in
-    // products with A and applications of M^-1, the same
-    // quantities KrylovResult reports.
+    // totalSeconds = setup + solve time, probe solves included.
+    // Work is counted in products with A and applications of
+    // M^-1, the same quantities KrylovResult reports.
+    //
+    // totalProbeSeconds : setup + solve time of probe rows only
+    // numProbes         : number of probes made
     //--------------------------------------------------
 
     double totalSeconds() const;
@@ -255,6 +311,10 @@ public:
     int numSwitches() const;
 
     int numFallbacks() const;
+
+    double totalProbeSeconds() const;
+
+    int numProbes() const;
 
     //--------------------------------------------------
     // Data
@@ -278,6 +338,16 @@ private:
     // Consecutive easy solves
     int easyCount;
 
+    // Probe policy state
+    bool needProbe;
+
+    int lastProbeStep;
+
+    // Iterations of the first normal solve after a probe; -1 = not yet
+    int refIters;
+
+    int probeCount;
+
     std::vector<SolveRecord> records;
 
     KrylovResult runChoice
@@ -291,6 +361,31 @@ private:
 
     // Updates index from the solve just made; true if it moved
     bool updatePolicy(const KrylovResult& r);
+
+    // Probe-policy version of solve
+    KrylovResult solveProbed
+    (
+        const std::vector<std::vector<double>>& A,
+        const std::vector<double>& b,
+        const std::vector<double>& x0
+    );
+
+    // Runs every candidate to the probe tolerance, appends the
+    // probe rows, sets index to the winner. On return start is
+    // the winner's probe solution (x0 if nobody converged) and,
+    // if keptValid, kept is the winner's preconditioner
+    // (keptValid stays false for an unpreconditioned winner).
+    // switchedNow tells whether index changed.
+    void probeSelect
+    (
+        const std::vector<std::vector<double>>& A,
+        const std::vector<double>& b,
+        const std::vector<double>& x0,
+        std::vector<double>& start,
+        Preconditioner& kept,
+        bool& keptValid,
+        bool& switchedNow
+    );
 };
 
 #endif

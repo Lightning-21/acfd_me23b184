@@ -13,7 +13,7 @@
 // proposal. No reference data exists for the ratios other than
 // 10, so these runs only compare solvers.
 //
-// Two modes:
+// Three modes:
 //
 //     sweep     every solver in the list, for every grid size and
 //               density ratio: iterations, matrix-vector products,
@@ -28,8 +28,18 @@
 //               agree with the best fixed run to within physTol;
 //               if it brings no gain, that is the result reported
 //
+//     probe     same comparison, but the switching is the probe
+//               policy of SolverSelector: every candidate is run on
+//               the current pressure system to probeTol, the one
+//               with the smallest setup + solve time is kept (work
+//               counts break ties). The probe cost is included in
+//               the total time, so the comparison with the best
+//               fixed run is fair. Results go to a separate
+//               decision file (extra columns probeSeconds, probes,
+//               finalSolver)
+//
 // Usage:
-//     SolverStudy <sweep|adaptive> [key=value ...]
+//     SolverStudy <sweep|adaptive|probe> [key=value ...]
 //
 // Options:
 //     N=              list of cells across the width; the grid
@@ -41,7 +51,7 @@
 //     solvers=        comma-separated "<method>+<precond>" list
 //                     sweep:    CG+Jacobi,CG+SGS,CG+IC0,BiCGSTAB+Jacobi,
 //                               BiCGSTAB+SGS,BiCGSTAB+ILU0,BiCGSTAB+IC0
-//                     adaptive: CG+Jacobi,CG+SGS,CG+IC0
+//                     adaptive, probe: CG+Jacobi,CG+SGS,CG+IC0
 //     tol=            relative tolerance of the pressure solve (1e-10)
 //     maxIter=        iteration cap of the pressure solve     (5000)
 //     eps=            interface half-width in cells           (1.5)
@@ -52,12 +62,20 @@
 //                     this many                               (60, 15)
 //     patience=       easy solves in a row before moving down (3)
 //     hold=           minimum solves between two switches     (5)
-//     physTol=        adaptive mode: largest relative difference
-//                     of final centre of mass and rise velocity
-//                     from the best fixed run                 (1e-6)
+//     probeTol=       probe mode: tolerance of the probe solves (1e-5)
+//     probeEvery=     probe mode: solves between scheduled probes (50)
+//     drift=          probe mode: iteration growth factor that
+//                     triggers an extra probe                 (1.5)
+//     tieBand=        probe mode: relative time band treated as a
+//                     tie, decided on work counts             (0.1)
+//     physTol=        adaptive and probe mode: largest relative
+//                     difference of final centre of mass and rise
+//                     velocity from the best fixed run        (1e-6)
 //     summary=        run summary file     (summary_solverStudy.csv)
 //     decision=       adaptive mode: decision file
 //                                          (summary_switching.csv)
+//     probeDecision=  probe mode: decision file
+//                                          (summary_probe.csv)
 //     print=          1 prints one line per run, 0 is silent  (1)
 //
 // All runs of one grid size and density ratio use the SAME time
@@ -75,6 +93,7 @@
 // is written when the file does not exist):
 //     summary_solverStudy.csv   one row per run
 //     summary_switching.csv     one row per adaptive comparison
+//     summary_probe.csv         one row per probe comparison
 //
 // Compilation Instruction:
 // g++ SolverStudy.cpp src/LevelSet.cpp src/TwoPhaseFlow.cpp src/SolverSelector.cpp src/BubbleDiagnostics.cpp src/KrylovSolvers.cpp src/Preconditioner.cpp src/MatrixFunctions.cpp src/MatrixAnalysis.cpp -Iinclude -std=c++17 -O2 -o solverStudy && ./solverStudy sweep N=20 steps=50
@@ -105,9 +124,10 @@ using namespace std;
 
 static void usage()
 {
-    cerr << "Usage: SolverStudy <sweep|adaptive> [key=value ...]" << endl
+    cerr << "Usage: SolverStudy <sweep|adaptive|probe> [key=value ...]" << endl
          << "Options: N ratios steps cfl dt solvers tol maxIter eps mu1 mu2"
-         << " maxUnknowns up down patience hold physTol summary decision print"
+         << " maxUnknowns up down patience hold probeTol probeEvery drift"
+         << " tieBand physTol summary decision probeDecision print"
          << endl;
 }
 
@@ -287,6 +307,14 @@ struct CaseResult
 
     int fallbacks = 0;
 
+    // Probe policy: cost of the probe solves (already in
+    // totalSeconds), number of probes, solver committed at the end
+    double probeSeconds = 0.0;
+
+    int probes = 0;
+
+    string finalSolver;
+
     // Final state and the smallest circularity of the run
     BubbleState state;
 
@@ -382,6 +410,9 @@ static CaseResult runCase
         res.solveSeconds = res.totalSeconds - res.setupSeconds;
         res.switches = solver.numSwitches();
         res.fallbacks = solver.numFallbacks();
+        res.probeSeconds = solver.totalProbeSeconds();
+        res.probes = solver.numProbes();
+        res.finalSolver = solverChoiceName(solver.current());
 
         double timeOfMin = 0.0;
 
@@ -410,9 +441,9 @@ static CaseResult runCase
 // Labels and Output
 //------------------------------------------------------------//
 
-static string adaptiveLabel(const vector<SolverChoice>& candidates)
+static string adaptiveLabel(const vector<SolverChoice>& candidates, const string& prefix = "adaptive")
 {
-    string label = "adaptive[";
+    string label = prefix+"[";
 
     for(size_t k = 0; k < candidates.size(); k++)
     {
@@ -507,6 +538,13 @@ static void printRun
         cout << "  switches = " << r.switches << "  fallbacks = " << r.fallbacks;
     }
 
+    if(r.probes > 0)
+    {
+        cout << "  probes = " << r.probes
+             << "  probeTime = " << r.probeSeconds << " s"
+             << "  final = " << r.finalSolver;
+    }
+
     cout << "  " << r.status << endl;
 }
 
@@ -548,10 +586,12 @@ int main(int argc, char* argv[])
     {
         string mode = argv[1];
 
-        if(mode != "sweep" && mode != "adaptive")
+        if(mode != "sweep" && mode != "adaptive" && mode != "probe")
         {
-            throw invalid_argument("mode must be sweep or adaptive");
+            throw invalid_argument("mode must be sweep, adaptive or probe");
         }
+
+        bool isProbe = (mode == "probe");
 
         map<string, string> options = parseOptions(argc, argv, 2);
 
@@ -626,10 +666,21 @@ int main(int argc, char* argv[])
         policy.patience = getInt(options, "patience", 3);
         policy.holdSteps = getInt(options, "hold", 5);
 
+        // Probe policy for the probe mode (adaptive off; the
+        // selector gives the probe policy precedence anyway)
+        SwitchPolicy probePolicy;
+
+        probePolicy.probe = true;
+        probePolicy.probeTol = getDouble(options, "probeTol", 1e-5);
+        probePolicy.probeEvery = getInt(options, "probeEvery", 50);
+        probePolicy.driftFactor = getDouble(options, "drift", 1.5);
+        probePolicy.tieBand = getDouble(options, "tieBand", 0.10);
+
         double physTol = getDouble(options, "physTol", 1e-6);
 
         string summaryName = getString(options, "summary", "summary_solverStudy.csv");
         string decisionName = getString(options, "decision", "summary_switching.csv");
+        string probeDecisionName = getString(options, "probeDecision", "summary_probe.csv");
 
         bool printRuns = (getInt(options, "print", 1) != 0);
 
@@ -652,6 +703,20 @@ int main(int argc, char* argv[])
             );
         }
 
+        // Same columns, with "adaptive" read as "probe" (total time and
+        // iterations include the probe solves), then the probe columns
+        if(isProbe)
+        {
+            writeHeaderIfNew
+            (
+                probeDecisionName,
+                "N,Nx,Ny,ratio,bestFixed,bestFixedSeconds,probeTotalSeconds,"
+                "bestFixedIterations,probeIterations,secondsRatio,"
+                "relDiffYc,relDiffVRise,physicalOK,switches,fallbacks,verdict,"
+                "probeSeconds,probes,finalSolver"
+            );
+        }
+
         ofstream summary(summaryName.c_str(), ios::app);
 
         if(!summary)
@@ -663,13 +728,15 @@ int main(int argc, char* argv[])
 
         ofstream decision;
 
-        if(mode == "adaptive")
+        if(mode == "adaptive" || isProbe)
         {
-            decision.open(decisionName.c_str(), ios::app);
+            const string& decisionFile = isProbe ? probeDecisionName : decisionName;
+
+            decision.open(decisionFile.c_str(), ios::app);
 
             if(!decision)
             {
-                throw runtime_error("cannot open '"+decisionName+"'");
+                throw runtime_error("cannot open '"+decisionFile+"'");
             }
 
             decision << setprecision(10);
@@ -722,7 +789,7 @@ int main(int argc, char* argv[])
                     continue;
                 }
 
-                // Adaptive mode: every candidate fixed, then adaptive
+                // Adaptive and probe mode: every candidate fixed, then adaptive / probe
                 vector<CaseResult> fixedResults;
 
                 for(size_t k = 0; k < candidates.size(); k++)
@@ -754,9 +821,10 @@ int main(int argc, char* argv[])
                     fixedResults.push_back(r);
                 }
 
-                CaseResult adaptive = runCase(cs, candidates, policy);
+                // In probe mode "adaptive" below is the probe run
+                CaseResult adaptive = runCase(cs, candidates, isProbe ? probePolicy : policy);
 
-                string adaptiveName = adaptiveLabel(candidates);
+                string adaptiveName = adaptiveLabel(candidates, isProbe ? "probe" : "adaptive");
 
                 writeRunRow(summary, mode, cs, adaptiveName, adaptive);
 
@@ -854,7 +922,17 @@ int main(int argc, char* argv[])
                          << (physicalOK ? 1 : 0) << ","
                          << adaptive.switches << ","
                          << adaptive.fallbacks << ","
-                         << csvSafe(verdict) << "\n";
+                         << csvSafe(verdict);
+
+                if(isProbe)
+                {
+                    decision << ","
+                             << adaptive.probeSeconds << ","
+                             << adaptive.probes << ","
+                             << adaptive.finalSolver;
+                }
+
+                decision << "\n";
 
                 decision.flush();
 
@@ -862,7 +940,7 @@ int main(int argc, char* argv[])
                      << "  ratio = " << cs.ratio
                      << "  best fixed = " << bestName
                      << " (" << bestSeconds << " s)"
-                     << "  adaptive = " << adaptive.totalSeconds << " s"
+                     << "  " << (isProbe ? "probe" : "adaptive") << " = " << adaptive.totalSeconds << " s"
                      << "  relDiff(yc) = " << diffYc
                      << "  relDiff(vRise) = " << diffV
                      << "  " << verdict << endl;

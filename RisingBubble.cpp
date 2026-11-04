@@ -32,6 +32,16 @@
 //     cfl=            fraction of the stable time step       (0.5)
 //     dt=             fixed time step (> 0 overrides cfl)    (0)
 //     solver=         pressure solver, "<method>+<precond>"  (CG+IC0)
+//                     with probe=1 a comma-separated candidate list
+//                     (CG+Jacobi,CG+SGS,CG+IC0)
+//     probe=          1 = probe policy: every candidate is run on the
+//                     pressure system to probeTol and the cheapest
+//                     (setup + solve time) is used            (0)
+//     probeTol=       tolerance of the probe solves           (1e-5)
+//     probeEvery=     solves between scheduled probes         (50)
+//     drift=          iteration growth factor that triggers an
+//                     extra probe                             (1.5)
+//     tieBand=        relative time band treated as a tie     (0.1)
 //     tol=            relative tolerance of the pressure solve (1e-10)
 //     maxIter=        iteration cap of the pressure solve    (5000)
 //     eps=            interface half-width in cells          (1.5)
@@ -106,6 +116,7 @@ static void usage()
 {
     cerr << "Usage: RisingBubble <N> [key=value ...]" << endl
          << "Options: tEnd cfl dt solver tol maxIter eps reinit reinitSteps"
+         << " probe probeTol probeEvery drift tieBand"
          << " convection record maxUnknowns field out summary print" << endl;
 }
 
@@ -260,7 +271,14 @@ int main(int argc, char* argv[])
 
         double epsFactor = getDouble(options, "eps", 1.5);
 
-        string solverName = getString(options, "solver", "CG+IC0");
+        bool useProbe = (getInt(options, "probe", 0) != 0);
+
+        string solverName = getString
+        (
+            options,
+            "solver",
+            useProbe ? "CG+Jacobi,CG+SGS,CG+IC0" : "CG+IC0"
+        );
         string convection = getString(options, "convection", "upwind");
         string out = getString(options, "out", "rising_N"+to_string(N));
         string summaryName = getString(options, "summary", "summary_rising.csv");
@@ -320,7 +338,19 @@ int main(int argc, char* argv[])
         krylov.tol = getDouble(options, "tol", 1e-10);
         krylov.maxIter = getInt(options, "maxIter", 5000);
 
-        SolverSelector solver(parseSolverList(solverName), krylov);
+        SwitchPolicy policy;
+
+        policy.probe = useProbe;
+        policy.probeTol = getDouble(options, "probeTol", 1e-5);
+        policy.probeEvery = getInt(options, "probeEvery", 50);
+        policy.driftFactor = getDouble(options, "drift", 1.5);
+        policy.tieBand = getDouble(options, "tieBand", 0.10);
+
+        SolverSelector solver(parseSolverList(solverName), krylov, policy);
+
+        // Name written to the console and the summary: the committed
+        // solver for a fixed run, the candidate list for a probe run
+        string solverLabel = useProbe ? "probe["+solverName+"]" : solverChoiceName(solver.current());
 
         TwoPhaseFlow flow(N, 2*N, 1.0, 2.0, params, epsFactor, maxUnknowns);
 
@@ -426,7 +456,7 @@ int main(int argc, char* argv[])
         string status = (notConverged == 0) ? "ok" : "pressure solve not converged";
 
         cout << "N = " << N << " x " << 2*N
-             << "  solver = " << solverChoiceName(solver.current())
+             << "  solver = " << solverLabel
              << "  steps = " << step << endl
              << fixed << setprecision(4)
              << "min circularity   = " << minCirc << " at t = " << tCirc
@@ -442,6 +472,12 @@ int main(int argc, char* argv[])
              << "max |div u|       = " << maxDivergence << endl
              << "pressure solves   = " << totalIterations << " iterations in total"
              << endl
+             << (useProbe
+                 ? "probe policy      = " + to_string(solver.numProbes()) + " probes, "
+                   + to_string(solver.totalProbeSeconds()) + " s probing, "
+                   + to_string(solver.totalSeconds()) + " s total solve time, final solver "
+                   + solverChoiceName(solver.current()) + "\n"
+                 : string(""))
              << "status            = " << status << endl;
 
         bool writeHeader = !fileExists(summaryName);
@@ -464,7 +500,7 @@ int main(int argc, char* argv[])
         summary << N << ","
                 << N << ","
                 << 2*N << ","
-                << solverChoiceName(solver.current()) << ","
+                << solverLabel << ","
                 << step << ","
                 << flow.time << ","
                 << minCirc << ","

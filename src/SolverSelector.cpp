@@ -16,6 +16,10 @@
 //   Switching : an optional policy moves up or down the list
 //               between solves from the observed iteration
 //               count
+//   Probing   : alternatively (SwitchPolicy::probe) every
+//               candidate is run on the current system to a
+//               loose tolerance and the cheapest one (setup +
+//               solve time, work counts as tie-break) is kept
 //
 // The preconditioner is rebuilt in every solve because the
 // matrix changes with the interface, and its setup time is
@@ -26,9 +30,12 @@
 
 #include "SolverSelector.h"
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <exception>
 #include <stdexcept>
+#include <utility>
 
 using namespace std;
 
@@ -255,7 +262,11 @@ SolverSelector::SolverSelector
     index(0),
     step(0),
     sinceSwitch(0),
-    easyCount(0)
+    easyCount(0),
+    needProbe(true),
+    lastProbeStep(0),
+    refIters(-1),
+    probeCount(0)
 {
     if(candidates.empty())
     {
@@ -273,6 +284,20 @@ SolverSelector::SolverSelector
         (
             "SolverSelector: upIters, downIters, patience and holdSteps "
             "must all be at least 1 for an adaptive policy."
+        );
+    }
+
+    if
+    (
+        policy.probe
+     && (policy.probeTol <= 0.0 || policy.probeEvery < 1
+      || policy.driftFactor <= 1.0 || policy.tieBand < 0.0)
+    )
+    {
+        throw invalid_argument
+        (
+            "SolverSelector: probeTol must be positive, probeEvery at least 1, "
+            "driftFactor above 1 and tieBand not negative for a probe policy."
         );
     }
 }
@@ -375,6 +400,11 @@ KrylovResult SolverSelector::solve
     const vector<double>& x0
 )
 {
+    if(policy.probe && candidates.size() >= 2)
+    {
+        return solveProbed(A, b, x0);
+    }
+
     bool fellBack = false;
 
     int attempts = 0;
@@ -438,6 +468,305 @@ KrylovResult SolverSelector::solve
 }
 
 //------------------------------------------------------------//
+// Probe Policy
+//
+// Every candidate solves the current system to the probe
+// tolerance; the cheapest (setup + solve seconds, tie-break on
+// matVecs + precondApplies inside the tie band) is kept. The
+// comparison is streaming: each candidate is compared with the
+// best so far, so only one preconditioner is kept in memory.
+//------------------------------------------------------------//
+
+void SolverSelector::probeSelect
+(
+    const vector<vector<double>>& A,
+    const vector<double>& b,
+    const vector<double>& x0,
+    vector<double>& start,
+    Preconditioner& kept,
+    bool& keptValid,
+    bool& switchedNow
+)
+{
+    KrylovOptions po = opt;
+
+    // A probe is never tighter than the real solve
+    po.tol = max(policy.probeTol, opt.tol);
+
+    bool haveBest = false;
+
+    int bestIdx = index;
+
+    double minCost = 0.0;
+    double bestCost = 0.0;
+    double bestWork = 0.0;
+
+    size_t bestRow = 0;
+
+    vector<double> bestX;
+
+    Preconditioner bestP;
+
+    bool bestPValid = false;
+
+    for(int k = 0; k < (int)candidates.size(); k++)
+    {
+        const SolverChoice& c = candidates[k];
+
+        SolveRecord rec;
+
+        rec.step = step;
+        rec.candidate = k;
+        rec.name = solverChoiceName(c);
+        rec.probed = true;
+
+        double setupSeconds = 0.0;
+
+        KrylovResult r;
+
+        Preconditioner P;
+
+        bool ok = true;
+
+        try
+        {
+            if(c.usePreconditioner)
+            {
+                chrono::steady_clock::time_point t0 = chrono::steady_clock::now();
+
+                P = buildPreconditioner(c.precond, c.mode, A, c.omega);
+
+                chrono::steady_clock::time_point t1 = chrono::steady_clock::now();
+
+                setupSeconds = chrono::duration<double>(t1-t0).count();
+
+                r = solveKrylov(c.method, A, b, x0, &P, po);
+            }
+            else
+            {
+                r = solveKrylov(c.method, A, b, x0, nullptr, po);
+            }
+        }
+        catch(const exception&)
+        {
+            // Setup failure, or a method / preconditioner pair
+            // that is not allowed (CG with GS or SOR): out of this probe
+            ok = false;
+        }
+
+        if(!ok)
+        {
+            rec.status = KrylovStatus::Breakdown;
+
+            records.push_back(rec);
+
+            continue;
+        }
+
+        rec.status = r.status;
+        rec.iterations = r.iterations;
+        rec.matVecs = r.matVecs;
+        rec.precondApplies = r.precondApplies;
+        rec.setupSeconds = setupSeconds;
+        rec.solveSeconds = r.seconds;
+        rec.trueRelResidual = r.trueRelResidual;
+
+        size_t row = records.size();
+
+        records.push_back(rec);
+
+        if(r.status != KrylovStatus::Converged)
+        {
+            continue;
+        }
+
+        double cost = setupSeconds + r.seconds;
+
+        double work = (double)(r.matVecs + r.precondApplies);
+
+        bool better = false;
+
+        if(!haveBest)
+        {
+            better = true;
+        }
+        else if(cost < minCost*(1.0 - policy.tieBand))
+        {
+            better = true;
+        }
+        else if(cost <= minCost*(1.0 + policy.tieBand))
+        {
+            // Tie on time: fewer operations wins
+            better = (work < bestWork) || (work == bestWork && cost < bestCost);
+        }
+
+        if(!haveBest || cost < minCost)
+        {
+            minCost = cost;
+        }
+
+        if(better)
+        {
+            haveBest = true;
+
+            bestIdx = k;
+            bestCost = cost;
+            bestWork = work;
+            bestRow = row;
+
+            bestX = std::move(r.x);
+
+            if(c.usePreconditioner)
+            {
+                bestP = std::move(P);
+                bestPValid = true;
+            }
+            else
+            {
+                bestPValid = false;
+            }
+        }
+    }
+
+    probeCount++;
+
+    lastProbeStep = step;
+    needProbe = false;
+    refIters = -1;
+    sinceSwitch = 0;
+    easyCount = 0;
+
+    start = x0;
+    keptValid = false;
+    switchedNow = false;
+
+    // Nobody converged: keep the current candidate and the old guess
+    if(haveBest)
+    {
+        records[bestRow].chosen = true;
+
+        switchedNow = (bestIdx != index);
+
+        index = bestIdx;
+
+        start = std::move(bestX);
+
+        if(bestPValid)
+        {
+            kept = std::move(bestP);
+            keptValid = true;
+        }
+    }
+}
+
+KrylovResult SolverSelector::solveProbed
+(
+    const vector<vector<double>>& A,
+    const vector<double>& b,
+    const vector<double>& x0
+)
+{
+    bool due = needProbe || (step - lastProbeStep >= policy.probeEvery);
+
+    vector<double> start = x0;
+
+    Preconditioner kept;
+
+    bool keptValid = false;
+
+    bool switchedNow = false;
+
+    bool probedNow = false;
+
+    if(due)
+    {
+        probeSelect(A, b, x0, start, kept, keptValid, switchedNow);
+
+        probedNow = true;
+    }
+
+    while(true)
+    {
+        const SolverChoice& c = candidates[index];
+
+        double setupSeconds = 0.0;
+
+        KrylovResult r;
+
+        try
+        {
+            if(keptValid)
+            {
+                // Preconditioner already built (and counted) in the probe
+                r = solveKrylov(c.method, A, b, start, &kept, opt);
+            }
+            else
+            {
+                r = runChoice(c, A, b, start, setupSeconds);
+            }
+        }
+        catch(const runtime_error&)
+        {
+            // The committed candidate cannot be set up on this
+            // matrix: probe now. Already probed in this step: give up.
+            if(probedNow)
+            {
+                throw;
+            }
+
+            bool sw = false;
+
+            probeSelect(A, b, x0, start, kept, keptValid, sw);
+
+            switchedNow = switchedNow || sw;
+
+            probedNow = true;
+
+            continue;
+        }
+
+        SolveRecord rec;
+
+        rec.step = step;
+        rec.candidate = index;
+        rec.name = solverChoiceName(c);
+        rec.status = r.status;
+        rec.iterations = r.iterations;
+        rec.matVecs = r.matVecs;
+        rec.precondApplies = r.precondApplies;
+        rec.setupSeconds = setupSeconds;
+        rec.solveSeconds = r.seconds;
+        rec.trueRelResidual = r.trueRelResidual;
+        rec.switched = switchedNow;
+
+        records.push_back(rec);
+
+        if(!probedNow)
+        {
+            // Reference count from the first normal solve after a
+            // probe; a large rise above it asks for a new probe
+            if(refIters < 0)
+            {
+                refIters = max(r.iterations, 1);
+            }
+            else if(r.iterations > max(policy.driftFactor*refIters, (double)(refIters+5)))
+            {
+                needProbe = true;
+            }
+        }
+
+        if(r.status != KrylovStatus::Converged)
+        {
+            needProbe = true;
+        }
+
+        step++;
+
+        return r;
+    }
+}
+
+//------------------------------------------------------------//
 // State
 //------------------------------------------------------------//
 
@@ -462,6 +791,11 @@ void SolverSelector::reset()
     step = 0;
     sinceSwitch = 0;
     easyCount = 0;
+
+    needProbe = true;
+    lastProbeStep = 0;
+    refIters = -1;
+    probeCount = 0;
 
     records.clear();
 }
@@ -558,4 +892,24 @@ int SolverSelector::numFallbacks() const
     }
 
     return count;
+}
+
+double SolverSelector::totalProbeSeconds() const
+{
+    double sum = 0.0;
+
+    for(size_t k = 0; k < records.size(); k++)
+    {
+        if(records[k].probed)
+        {
+            sum += records[k].setupSeconds + records[k].solveSeconds;
+        }
+    }
+
+    return sum;
+}
+
+int SolverSelector::numProbes() const
+{
+    return probeCount;
 }
