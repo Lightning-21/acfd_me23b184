@@ -182,6 +182,38 @@ public:
     );
 
     //--------------------------------------------------
+    // Volume Correction
+    //
+    // The level set method does not conserve the bubble area:
+    // upwind advection and the reinitialisation both move the
+    // zero contour. The bubble volume is measured with the same
+    // smoothed Heaviside that sets the density,
+    //
+    //   V = sum (1 - H(phi)) dx dy
+    //
+    // and correctVolume shifts phi by a constant c, phi <- phi + c,
+    // so that V equals targetVolume (Sussman and Fatemi style
+    // volume correction). A constant shift keeps phi a distance
+    // function. V decreases monotonically with c, so c is found by
+    // bisection to a relative tolerance relTol.
+    //
+    // The shift is limited to |c| <= 2 eps, so a bubble that is
+    // already lost (or a target that cannot be reached) gets a
+    // clamped, partial correction instead of a wild one.
+    //
+    // volume returns V. correctVolume returns the shift applied
+    // (0 if targetVolume <= 0).
+    //--------------------------------------------------
+
+    double volume() const;
+
+    double correctVolume
+    (
+        double targetVolume,
+        double relTol = 1.0e-12
+    );
+
+    //--------------------------------------------------
     // Smoothed Heaviside and Delta
     //
     //   H(p) = 0                                     p <= -eps
@@ -262,6 +294,9 @@ private:
     //--------------------------------------------------
     // Index clamping (zero-gradient condition at the walls)
     //--------------------------------------------------
+
+    // V of phi + shift (does not change phi)
+    double volumeAt(double shift) const;
 
     int clampI(int I) const;
 

@@ -1,0 +1,5 @@
+N,Nx,Ny,ratio,bestFixed,bestFixedSeconds,adaptiveSeconds,bestFixedIterations,adaptiveIterations,secondsRatio,relDiffYc,relDiffVRise,physicalOK,switches,fallbacks,verdict
+20,20,40,1,CG+Jacobi,6.143466,6.416081,6623,2322,1.044374788,2.999902833e-013,2.728874732e-009,1,2,0,NO GAIN: not faster than the best fixed run
+20,20,40,10,CG+IC0,6.727434,6.924159,2141,2402,1.029242204,2.049031397e-016,2.20798105e-015,1,2,0,NO GAIN: not faster than the best fixed run
+20,20,40,100,CG+IC0,5.887825,6.340071,2211,2480,1.076810367,6.531582093e-016,8.908817331e-015,1,2,0,NO GAIN: not faster than the best fixed run
+20,20,40,1000,CG+Jacobi,6.38477,7.048381,7197,2582,1.103936555,2.212299616e-016,3.541470739e-012,1,2,0,NO GAIN: not faster than the best fixed run

@@ -1,0 +1,9 @@
+N,Nx,Ny,ratio,bestFixed,bestFixedSeconds,probeTotalSeconds,bestFixedIterations,probeIterations,secondsRatio,relDiffYc,relDiffVRise,physicalOK,switches,fallbacks,verdict,probeSeconds,probes,finalSolver
+10,10,20,1,CG+IC0,0.648533,0.649295,4813,7180,1.001174959,nan,0,0,6,0,REJECTED: physical results differ from the best fixed run,0.048311,10,CG+IC0
+10,10,20,10,CG+IC0,0.539521,0.598694,5139,6119,1.109676917,nan,0,0,7,0,REJECTED: physical results differ from the best fixed run,0.058888,10,CG+IC0
+10,10,20,100,CG+IC0,0.522304,0.655392,5268,7437,1.25480946,nan,0,0,8,0,REJECTED: physical results differ from the best fixed run,0.06577,10,CG+IC0
+10,10,20,1000,CG+IC0,0.548334,0.612057,5333,7223,1.116212017,nan,0,0,5,0,REJECTED: physical results differ from the best fixed run,0.057169,10,CG+Jacobi
+15,15,30,1,CG+IC0,4.215584,4.704541,7971,10908,1.115987963,3.265965764e-013,1.263960269e-010,1,3,0,NO GAIN: not faster than the best fixed run,0.517819,10,CG+IC0
+15,15,30,10,CG+IC0,4.586955,5.212473,7873,10751,1.136368898,nan,0,0,2,0,REJECTED: physical results differ from the best fixed run,0.655018,10,CG+Jacobi
+15,15,30,100,CG+IC0,4.590462,4.959178,8170,11131,1.080322199,nan,0,0,3,0,REJECTED: physical results differ from the best fixed run,0.527049,10,CG+IC0
+15,15,30,1000,CG+IC0,4.668934,5.192104,8559,13397,1.112053415,1.832116834e-014,2.315647418e-014,1,5,0,NO GAIN: not faster than the best fixed run,0.561038,10,CG+IC0

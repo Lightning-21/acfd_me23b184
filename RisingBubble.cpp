@@ -47,6 +47,8 @@
 //     eps=            interface half-width in cells          (1.5)
 //     reinit=         reinitialise every n steps (0 = never) (1)
 //     reinitSteps=    pseudo-time steps per reinitialisation (15)
+//     volcorr=        1 = restore the bubble volume every step by a
+//                     constant shift of phi                   (0)
 //     convection=     upwind | central                       (upwind)
 //     record=         record the bubble every n steps        (1)
 //     maxUnknowns=    limit on N*2N (dense matrices)         (16000)
@@ -116,7 +118,7 @@ static void usage()
 {
     cerr << "Usage: RisingBubble <N> [key=value ...]" << endl
          << "Options: tEnd cfl dt solver tol maxIter eps reinit reinitSteps"
-         << " probe probeTol probeEvery drift tieBand"
+         << " volcorr probe probeTol probeEvery drift tieBand"
          << " convection record maxUnknowns field out summary print" << endl;
 }
 
@@ -319,6 +321,7 @@ int main(int argc, char* argv[])
 
         params.reinitEvery = getInt(options, "reinit", 1);
         params.reinitSteps = getInt(options, "reinitSteps", 15);
+        params.volumeCorrection = (getInt(options, "volcorr", 0) != 0);
 
         if(convection == "upwind")
         {

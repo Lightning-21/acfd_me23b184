@@ -78,6 +78,12 @@ enum class TPConvection
 //               until |grad(phi)| = 1 inside the interface
 //               thickness, so about eps/dtau = 15 steps are
 //               needed for eps = 1.5 dx.
+//
+// volumeCorrection : after the advection and reinitialisation of
+//               every step, shift phi by a constant so that the
+//               bubble volume returns to its initial value
+//               (LevelSet::correctVolume). Off by default; the
+//               uncorrected method loses bubble area.
 //--------------------------------------------------
 
 struct TwoPhaseParameters
@@ -103,6 +109,8 @@ struct TwoPhaseParameters
     int reinitEvery = 1;
 
     int reinitSteps = 15;
+
+    bool volumeCorrection = false;
 };
 
 //--------------------------------------------------
@@ -129,6 +137,12 @@ struct TwoPhaseStepInfo
 
     // max |div u| after the projection
     double maxDivergence = 0.0;
+
+    // Constant added to phi by the volume correction (0 if off)
+    double volumeShift = 0.0;
+
+    // Bubble volume at the end of the step over its initial value
+    double volumeRatio = 1.0;
 };
 
 //--------------------------------------------------
@@ -171,6 +185,8 @@ struct TwoPhaseStepInfo
 //      refCell is pinned to zero.
 //   4. correction  u^{n+1} = u* - dt (1/rho_f) grad(p)
 //   5. advect phi with u^{n+1} (LevelSet), then reinitialise it
+//      and, if params.volumeCorrection is set, restore the
+//      bubble volume with a constant shift of phi
 //
 // The pressure solve goes through a SolverSelector, so the
 // Krylov method and preconditioner are chosen (and may be
@@ -223,6 +239,10 @@ public:
     double time;
 
     int stepCount;
+
+    // Bubble volume sum (1 - H(phi)) dx dy at initBubble; the
+    // target of the volume correction
+    double bubbleVolume0;
 
     //--------------------------------------------------
     // Constructor

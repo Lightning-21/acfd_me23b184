@@ -60,7 +60,8 @@ TwoPhaseFlow::TwoPhaseFlow
     level(Nx_, Ny_, Lx_, Ly_, epsFactor),
     refCell(0),
     time(0.0),
-    stepCount(0)
+    stepCount(0),
+    bubbleVolume0(0.0)
 {
     if(params.rho1 <= 0.0 || params.rho2 <= 0.0)
     {
@@ -120,6 +121,8 @@ void TwoPhaseFlow::initBubble
 
     time = 0.0;
     stepCount = 0;
+
+    bubbleVolume0 = level.volume();
 
     computeProperties();
 }
@@ -581,6 +584,14 @@ void TwoPhaseFlow::step
         level.reinitialise(params.reinitSteps);
     }
 
+    // Restore the bubble volume lost to advection and reinitialisation
+    double volumeShift = 0.0;
+
+    if(params.volumeCorrection && bubbleVolume0 > 0.0)
+    {
+        volumeShift = level.correctVolume(bubbleVolume0);
+    }
+
     time += dt;
 
     info.dt = dt;
@@ -590,6 +601,8 @@ void TwoPhaseFlow::step
     info.precondApplies = r.precondApplies;
     info.trueRelResidual = r.trueRelResidual;
     info.maxDivergence = maxDivergence();
+    info.volumeShift = volumeShift;
+    info.volumeRatio = (bubbleVolume0 > 0.0) ? level.volume()/bubbleVolume0 : 1.0;
 }
 
 //------------------------------------------------------------//

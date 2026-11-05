@@ -11,6 +11,8 @@
 //   Advection        : first-order upwind, 3rd-order TVD RK
 //   Reinitialisation : Sussman-Smereka-Osher pseudo-time PDE,
 //                      Godunov upwind |grad(phi)|, dtau = dx/10
+//   Volume           : optional constant shift of phi that restores
+//                      the bubble volume (correctVolume)
 //   Interface        : smoothed Heaviside / delta of half-width
 //                      eps, density and viscosity fields,
 //                      curvature and continuum surface force
@@ -408,6 +410,94 @@ double LevelSet::reinitialise
     }
 
     return maxChange;
+}
+
+//------------------------------------------------------------//
+// Volume Correction
+//------------------------------------------------------------//
+
+double LevelSet::volumeAt(double shift) const
+{
+    double sum = 0.0;
+
+    for(int k = 0; k < Nx*Ny; k++)
+    {
+        sum += 1.0 - smoothedHeaviside(phi[k] + shift);
+    }
+
+    return sum*dx*dy;
+}
+
+double LevelSet::volume() const
+{
+    return volumeAt(0.0);
+}
+
+double LevelSet::correctVolume
+(
+    double targetVolume,
+    double relTol
+)
+{
+    if(targetVolume <= 0.0)
+    {
+        return 0.0;
+    }
+
+    // Already there: nothing to do
+    if(fabs(volumeAt(0.0) - targetVolume) <= relTol*targetVolume)
+    {
+        return 0.0;
+    }
+
+    double lo = -2.0*eps;
+    double hi = 2.0*eps;
+
+    // V decreases with the shift: V(lo) is the largest volume
+    // and V(hi) the smallest reachable one
+    double shift;
+
+    if(targetVolume >= volumeAt(lo))
+    {
+        shift = lo;
+    }
+    else if(targetVolume <= volumeAt(hi))
+    {
+        shift = hi;
+    }
+    else
+    {
+        shift = 0.0;
+
+        for(int it = 0; it < 100; it++)
+        {
+            shift = 0.5*(lo + hi);
+
+            double V = volumeAt(shift);
+
+            if(fabs(V - targetVolume) <= relTol*targetVolume)
+            {
+                break;
+            }
+
+            if(V > targetVolume)
+            {
+                // too much bubble: larger shift
+                lo = shift;
+            }
+            else
+            {
+                hi = shift;
+            }
+        }
+    }
+
+    for(int k = 0; k < Nx*Ny; k++)
+    {
+        phi[k] += shift;
+    }
+
+    return shift;
 }
 
 //------------------------------------------------------------//

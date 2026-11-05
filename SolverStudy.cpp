@@ -55,6 +55,7 @@
 //     tol=            relative tolerance of the pressure solve (1e-10)
 //     maxIter=        iteration cap of the pressure solve     (5000)
 //     eps=            interface half-width in cells           (1.5)
+//     volcorr=        1 = restore the bubble volume every step (0)
 //     mu1= mu2=       viscosity of liquid / bubble            (10, 1)
 //     maxUnknowns=    limit on N*2N (dense matrices)          (16000)
 //     up= down=       switching policy: move up above this many
@@ -126,7 +127,7 @@ static void usage()
 {
     cerr << "Usage: SolverStudy <sweep|adaptive|probe> [key=value ...]" << endl
          << "Options: N ratios steps cfl dt solvers tol maxIter eps mu1 mu2"
-         << " maxUnknowns up down patience hold probeTol probeEvery drift"
+         << " volcorr maxUnknowns up down patience hold probeTol probeEvery drift"
          << " tieBand physTol summary decision probeDecision print"
          << endl;
 }
@@ -262,6 +263,8 @@ struct CaseSettings
 
     double epsFactor = 1.5;
 
+    bool volCorr = false;
+
     double mu1 = 10.0;
 
     double mu2 = 1.0;
@@ -346,6 +349,8 @@ static CaseResult runCase
         params.sigma = 24.5;
         params.gx = 0.0;
         params.gy = -0.98;
+
+        params.volumeCorrection = cs.volCorr;
 
         params.walls.left = WallType::FreeSlip;
         params.walls.right = WallType::FreeSlip;
@@ -640,6 +645,7 @@ int main(int argc, char* argv[])
         base.cfl = getDouble(options, "cfl", 0.5);
         base.dt = getDouble(options, "dt", 0.0);
         base.epsFactor = getDouble(options, "eps", 1.5);
+        base.volCorr = (getInt(options, "volcorr", 0) != 0);
         base.mu1 = getDouble(options, "mu1", 10.0);
         base.mu2 = getDouble(options, "mu2", 1.0);
         base.tol = getDouble(options, "tol", 1e-10);

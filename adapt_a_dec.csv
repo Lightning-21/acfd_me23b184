@@ -1,0 +1,9 @@
+N,Nx,Ny,ratio,bestFixed,bestFixedSeconds,adaptiveSeconds,bestFixedIterations,adaptiveIterations,secondsRatio,relDiffYc,relDiffVRise,physicalOK,switches,fallbacks,verdict
+10,10,20,1,CG+SGS,0.659833,0.457593,5714,5974,0.6934982033,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+10,10,20,10,CG+IC0,0.350896,0.412401,5139,6283,1.175279855,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+10,10,20,100,CG+IC0,0.397777,0.449951,5268,6385,1.131163944,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+10,10,20,1000,CG+IC0,0.405277,0.452924,5333,6479,1.117566504,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+15,15,30,1,CG+IC0,4.306167,4.701782,7971,9788,1.091871727,2.710907e-013,7.741723143e-011,1,1,0,NO GAIN: not faster than the best fixed run
+15,15,30,10,CG+IC0,4.119397,4.518382,7873,9717,1.096855195,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+15,15,30,100,CG+IC0,4.153455,4.751341,8170,9975,1.143949074,nan,0,0,1,0,REJECTED: physical results differ from the best fixed run
+15,15,30,1000,CG+IC0,4.39793,4.934005,8559,10460,1.121892572,2.013337086e-013,1.205680422e-012,1,1,0,NO GAIN: not faster than the best fixed run

@@ -34,6 +34,8 @@
 //     maxIter=        iteration cap of the pressure solve    (5000)
 //     eps=            interface half-width in cells          (1.5)
 //     reinit=         reinitialise every n steps (0 = never) (1)
+//     volcorr=        1 = restore the bubble volume every step by a
+//                     constant shift of phi                   (0)
 //     maxUnknowns=    limit on N*N (dense matrices)          (16000)
 //     out=            output file prefix  (staticDrop_N<N>)
 //     summary=        summary file                           (summary_staticDrop.csv)
@@ -82,7 +84,7 @@ static void usage()
 {
     cerr << "Usage: StaticDrop <N> [key=value ...]" << endl
          << "Options: R sigma rho1 rho2 mu1 mu2 steps cfl dt solver tol maxIter"
-         << " eps reinit maxUnknowns out summary print" << endl;
+         << " eps reinit volcorr maxUnknowns out summary print" << endl;
 }
 
 static map<string, string> parseOptions
@@ -230,6 +232,7 @@ int main(int argc, char* argv[])
         params.gx = 0.0;
         params.gy = 0.0;
         params.reinitEvery = reinitEvery;
+        params.volumeCorrection = (getInt(options, "volcorr", 0) != 0);
 
         // Closed box, no-slip on every wall
         params.walls.left = WallType::NoSlip;
